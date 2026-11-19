@@ -80,7 +80,7 @@ Then press `cmd-shift-l` in Herdr and choose the `herdr-usage` layout.
 
 - **Key bindings and settings.** Merge `keys.json` and `settings.json` into your own by hand.
   Copying them replaces your bindings.
-- **Agent templates.** The Herdr skills in [saddlebag](https://github.com/rk68/saddlebag) start
+- **Agent templates.** The Herdr skills in [rstack](https://github.com/rk68/rstack) start
   agents from these templates:
 
   ```sh
@@ -143,7 +143,7 @@ names or paths.
 
 ## Related
 
-- [saddlebag](https://github.com/rk68/saddlebag): the agent skills that go with corral, including
+- [rstack](https://github.com/rk68/rstack): the agent skills that go with corral, including
   skills that drive Herdr.
 
 ## Licence
