@@ -7,7 +7,7 @@
 
 import { View, div, image, svg, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, spaces, focused, theme, props, run, exec, appHome, closeOverlay, layout } from "herdr";
+import { agents, terminals, panes, spaces, focused, theme, props, run, exec, appHome, closeOverlay, layout, shared } from "herdr";
 import * as team from "./examples/team.js";
 import * as platform from "./examples/platform.js";
 import { SHAPES, choose } from "./shapes.js";
@@ -1532,6 +1532,10 @@ export default class AgentFlow extends View {
 
   render() {
     const t = theme();
+    // A copy opened with props { follow: true } takes its view from shared("agent-flow.view") =
+    // { view, at }, so another mod can drive it (a recorded walkthrough). Other copies ignore it.
+    const ask = props()?.follow ? shared("agent-flow.view") : null;
+    if (ask && ask.at !== this.asked && VIEWS[ask.view]) { this.asked = ask.at; this.view = ask.view; }
     const { agents: all, plain } = this.world();
     // The space it's called from: props().space pins a copy to one space.
     const spaceId = this.sample ? null : props()?.space ?? focused()?.space ?? null;

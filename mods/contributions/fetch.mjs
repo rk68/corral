@@ -14,7 +14,9 @@ import os from "node:os";
 import path from "node:path";
 
 const DIR = path.join(os.homedir(), ".cache", "herdr-contributions");
-const CACHE = path.join(DIR, "cache.json");
+// One cache per GitHub login. cache.json is the file from before there was more than one.
+const cacheFile = (login) => path.join(DIR, `cache-${login}.json`);
+const OLD_CACHE = path.join(DIR, "cache.json");
 const LOCK = path.join(DIR, "lock");
 const FRESH_MS = 10 * 60000;   // how long a recent month's results stay good
 const FINAL_MS = 2 * 86400000; // a month this long over is never fetched again
@@ -26,7 +28,8 @@ const ymd = (d) => d.toISOString().slice(0, 10);
 
 function gh(args) {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).trim())) : resolve(stdout)));
+    // PWD: a gh wrapper may pick the account by folder, and the panel sets the folder.
+    execFile("gh", args, { maxBuffer: 64 * 1024 * 1024, env: { ...process.env, PWD: process.cwd() } }, (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).trim())) : resolve(stdout)));
   });
 }
 
@@ -123,7 +126,10 @@ async function detail() {
   start.setDate(start.getDate() - start.getDay());
   const fetching = await lock();
   let cache = {};
-  try { cache = JSON.parse(fs.readFileSync(CACHE, "utf8")); } catch { /* first run */ }
+  const CACHE = cacheFile(login);
+  for (const file of [CACHE, OLD_CACHE]) {
+    try { cache = JSON.parse(fs.readFileSync(file, "utf8")); if (cache.login === login) break; } catch { /* first run */ }
+  }
   if (cache.login !== login) cache = { login, months: {}, reviews: {} };
   cache.reviews ??= {};
   try {

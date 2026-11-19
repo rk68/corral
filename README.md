@@ -3,9 +3,11 @@
 Mods, layouts, themes and key bindings for the Herdr desktop app, set up for running many
 coding agents (Claude Code, Codex) side by side.
 
-![Herdr with a terminal, the contribution calendar, a pull request diff, Agent Flow and the pull request panel](docs/herdr.png)
+![A 30-second walkthrough of the mods](docs/demo.gif)
 
-<sub>The agents in these screenshots are Agent Flow's built-in example data.</sub>
+<sub>A 30-second walkthrough: Agent Flow's views, PR Stack, PR Diff, Activity, Plan, the Markdown
+viewer, Files and Usage. [Watch it as an MP4](docs/demo.mp4). The agents are Agent Flow's
+built-in example data, and the pull requests are in a small example repo.</sub>
 
 ## Mods
 
@@ -19,10 +21,13 @@ coding agents (Claude Code, Codex) side by side.
 | **agent-plans** | Each agent's plan in the right panel, from Claude Code and Codex hooks. |
 | **herdr-md** | A Markdown viewer pane with highlights and notes, driven from a shell by `mdh`. |
 | **my-files** | A file browser for the focused pane's folder. |
+| **walkthrough** | Plays a timeline of window commands with captions, for recording a demo like the one above. |
 
 The `herdr-usage` layout places these mods. `glacier` is the theme.
 
 ## Screenshots
+
+![Herdr with a terminal, the contribution calendar, a pull request diff, Agent Flow and the pull request panel](docs/herdr.png)
 
 ### Agent Flow
 
@@ -82,7 +87,7 @@ contributions uses the pixel fonts of the app's built-in `win98` mod.
 
 ```
 docs/                   screenshots
-mods/                   the eight mods
+mods/                   the mods
 layouts/, themes/       layouts and themes
 keys.json, settings.json
 herdr-core/templates/   hc agent templates: advisor, advisor-codex, reviewer

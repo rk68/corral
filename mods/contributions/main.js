@@ -30,8 +30,18 @@ const ago = (ms) => (ms < 60000 ? "just now" : ms < 3600000 ? `${Math.round(ms /
 const small = (el) => el.font_family(SMALL).text_size(11);
 const big = (el, size = 16) => el.font_family(BIG).text_size(size).line_height(`${size}px`);
 
-async function fetchJson(arg, timeout) {
-  const r = await exec("node", ["--no-warnings", `${appHome()}/mods/${MOD}/fetch.mjs`, arg], { timeout });
+// A folder whose GitHub account to show, for a gh wrapper that picks the account by folder.
+// Unset: the app's own folder.
+const ACCOUNT = "contributions.dir";
+const accountDir = () => shared(ACCOUNT) || null;
+// Repo names to leave out of "Where", for screen sharing: shared("contributions.hideRepos") = ["text", ...].
+const shownRepos = (repos) => {
+  const hide = (shared("contributions.hideRepos") ?? []).map((x) => String(x).toLowerCase());
+  return repos.filter(([repo]) => !hide.some((x) => repo.toLowerCase().includes(x)));
+};
+
+async function fetchJson(arg, timeout, cwd) {
+  const r = await exec("node", ["--no-warnings", `${appHome()}/mods/${MOD}/fetch.mjs`, arg], { timeout, ...(cwd ? { cwd } : {}) });
   let out;
   try { out = JSON.parse(r.stdout); } catch { throw new Error(r.stderr.trim().split("\n").pop() || `fetch.mjs exited ${r.code}`); }
   if (out.error) throw new Error(out.error);
@@ -68,6 +78,7 @@ export default class Contributions extends View {
     this.width = 360;
     this.height = 800;
     this.inner = 332;    // the content column's width
+    this.account = accountDir();
     this.load(cx, false);
     cx.timer.every(CAL_MS, (cx) => { if (isVisible()) this.load(cx, false); });
   }
@@ -75,9 +86,12 @@ export default class Contributions extends View {
   load(cx, force) {
     if (this.loading) return;
     this.loading = true;
+    const account = this.account;
     cx.spawn(async (cx) => {
       try {
-        this.cal = await fetchJson("calendar", 60000);
+        const cal = await fetchJson("calendar", 60000, account);
+        if (account !== this.account) { this.loading = false; this.load(cx, false); return; }
+        this.cal = cal;
         this.error = null;
         const today = this.cal.weeks.at(-1)?.at(-1);
         setShared(TODAY, { count: today?.[1] ?? 0, total: this.cal.total });
@@ -93,8 +107,13 @@ export default class Contributions extends View {
     this.loadingDetail = true;
     cx.notify();
     cx.spawn(async (cx) => {
-      try { this.detail = await fetchJson(force ? "--force" : "detail", 600000); } catch { /* the calendar still shows */ }
+      const account = this.account;
+      try {
+        const detail = await fetchJson(force ? "--force" : "detail", 600000, account);
+        if (account === this.account) this.detail = detail;
+      } catch { /* the calendar still shows */ }
       this.loadingDetail = false;
+      if (account !== this.account) this.loadDetail(cx, false);
       cx.notify();
     });
   }
@@ -240,9 +259,13 @@ export default class Contributions extends View {
 
   // ---------- the panel ----------
 
-  render() {
+  render(cx) {
     const t = theme();
     if (this.button) return this.renderButton(t);
+    if (accountDir() !== this.account) {
+      this.account = accountDir(); this.cal = null; this.detail = null; this.pinned = null;
+      this.load(cx, false);
+    }
     const root = v_flex().id("contrib").size_full().bg(t.chrome).text_color(t.foreground)
       .on_size_change((size, cx) => {
         if (Math.abs(size.width - this.width) > 1 || Math.abs(size.height - this.height) > 1) { this.width = size.width; this.height = size.height; cx.notify(); }
@@ -309,7 +332,7 @@ export default class Contributions extends View {
       col.child(this.section("What it was", "from search", t))
         .children(KINDS.map((k, i) => this.barRow(k, totals[i], most, kindColors[i], t)))
         .child(this.section("Where", "top repos", t))
-        .children(this.detail.repos.slice(0, 5).map(([repo, n]) => this.barRow(repo.replace(/^[^/]+\//, ""), n, this.detail.repos[0][1], `${t.accent}b0`, t)));
+        .children(shownRepos(this.detail.repos).slice(0, 5).map(([repo, n], _i, all) => this.barRow(repo.replace(/^[^/]+\//, ""), n, all[0][1], `${t.accent}b0`, t)));
     } else {
       col.child(this.section("What it was", "", t))
         .child(small(div()).text_color(t.dim).child(this.loadingDetail ? "> counting commits, PRs and reviews_ the first time takes a few minutes" : "no detail yet"));
