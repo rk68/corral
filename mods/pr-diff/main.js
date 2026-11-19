@@ -166,7 +166,7 @@ export default class PrDiff extends View {
       .child(div().flex_none().text_color(t.dim).child(pr ? `#${pr.number}` : target ? `#${target.number}` : ""))
       .child(div().flex_1().min_w(0).truncate().font_semibold().child(pr?.title ?? (this.loading ? "Loading the diff…" : "PR diff")))
       .when(Boolean(pr) && !slim, (e) => e
-        .child(div().flex_none().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(`${pr.changed} files`))
+        .child(div().flex_none().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(`${pr.changed} ${pr.changed === 1 ? "file" : "files"}`))
         .child(div().flex_none().text_size(11).text_color(t.ansi2).child(`+${pr.add}`))
         .child(div().flex_none().text_size(11).text_color(t.ansi1).child(`−${pr.del}`)))
       .when(Boolean(pr), (e) => e

@@ -416,7 +416,7 @@ export default class AgentFlow extends View {
 
   // Messages between siblings: a line of its own under the boxes, an arrow at the receiver,
   // a dot running while it's happening.
-  lanes(shown, list, t, room, bg) {
+  peerLanes(shown, list, t, room, bg) {
     const cell = room / shown.length;
     const x = (id) => (shown.findIndex((k) => k.id === id) + 0.5) * cell;
     const now = this.now();
@@ -792,7 +792,7 @@ export default class AgentFlow extends View {
       return v_flex().id(`row-${r}`).w_full().flex_none()
         .child(h_flex().w_full().items_stretch().children(shown.map((k) => h_flex().flex_1().min_w(0).px(3).items_stretch()
           .child(this.card(k, t, flows, dense, nest)))))
-        .when(peers.length > 0, (e) => e.child(this.lanes(shown, peers, t, room, bg)));
+        .when(peers.length > 0, (e) => e.child(this.peerLanes(shown, peers, t, room, bg)));
     };
     const back = kids.filter((k) => k.status === "done" || k.status === "idle").length;
     const open = kids.filter((k) => k.status === "working").length;
