@@ -3,7 +3,7 @@
 Mods, layouts, themes and key bindings for the Herdr desktop app, set up for running many
 coding agents (Claude Code, Codex) side by side.
 
-![A 30-second walkthrough of the mods](docs/demo.gif)
+[![A 30-second walkthrough of the mods](docs/demo.gif)](docs/demo.mp4)
 
 <sub>A 30-second walkthrough while a Claude Code session and a Codex session make small changes to
 an example repo: Agent Flow's views of those agents, PR Stack, PR Diff, Activity, Plan, the
