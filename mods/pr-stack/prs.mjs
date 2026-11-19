@@ -12,6 +12,7 @@
 // which PR is kept in ~/.cache/herdr-pr-stack/tasks.json; their live state comes from `hc ls`.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -89,8 +90,15 @@ async function autoMergeAllowed(dir, repo) {
   return out.trim() === "true";
 }
 
-const PR_FIELDS = "number,title,url,additions,deletions,changedFiles,headRefName,headRefOid,baseRefName,createdAt,isCrossRepository,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,autoMergeRequest";
-const listOpenPrs = async (dir) => JSON.parse(await gh(dir, ["pr", "list", "--author", "@me", "--state", "open", "--limit", "100", "--json", PR_FIELDS]));
+const PR_FIELDS = "number,title,url,additions,deletions,changedFiles,files,labels,headRefName,headRefOid,baseRefName,createdAt,isCrossRepository,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,autoMergeRequest";
+// Merge risk comes from the merge-risk skill, the rules the agents use too. Without the skill
+// installed, PRs carry no risk and the panel hides it.
+const RISK_SCRIPT = path.join(HOME, ".claude", "skills", "merge-risk", "scripts", "risk.mjs");
+const riskRules = import(pathToFileURL(RISK_SCRIPT).href).catch(() => null);
+async function listOpenPrs(dir) {
+  const [prs, rules] = await Promise.all([gh(dir, ["pr", "list", "--author", "@me", "--state", "open", "--limit", "100", "--json", PR_FIELDS]).then(JSON.parse), riskRules]);
+  return prs.map((pr) => ({ ...pr, risk: rules ? rules.withLabel(rules.mergeRisk(pr), pr.labels) : null }));
+}
 
 const THREADS = `query($q: String!) {
   search(query: $q, type: ISSUE, first: 100) {
@@ -668,6 +676,52 @@ async function deploys(dir) {
   };
 }
 
+// ---------- a failed trunk check ----------
+
+const DEPLOY_PROMPT = {
+  fix: (c) => `A check on ${c.trunk} failed after a merge.
+
+- Commit: ${c.sha} (${c.title})
+- Failed check: ${c.check}
+- Link: ${c.url || "none"}
+
+You are in a fresh worktree on the latest ${c.trunk}, on branch ${c.branch}.
+
+1. Read the failure. For a GitHub Actions run, use \`gh run view <run id> --log-failed\`. For a deployment, read the status and build log that the link names.
+2. Decide the cause: this commit, an earlier one, the environment, or a flaky step. For a flaky step, rerun it once with \`gh run rerun --failed <run id>\` and report. Make no PR for it.
+3. If the cause is code, make the smallest fix and run the repo's local checks. Commit, push this branch, and open a draft PR with the commit-pr conventions. Then run \`node ~/.claude/skills/merge-risk/scripts/risk.mjs pr <number> --write\`.
+4. Report the cause and the PR link. Do not merge.`,
+  revert: (c) => `The commit ${c.sha} on ${c.trunk} (${c.title}) broke ${c.check}: ${c.url || "no link"}.
+
+You are in a fresh worktree on the latest ${c.trunk}, on branch ${c.branch}.
+
+1. Run \`git revert --no-edit ${c.sha}\`. If it conflicts, stop and report the files.
+2. Run the repo's fast local checks: typecheck, lint, and the tests of the packages the revert touches.
+3. Push this branch and open a draft PR titled \`revert: ${c.title}\`. Its body links the failed check and says what must be fixed before the change lands again.
+4. Run \`node ~/.claude/skills/merge-risk/scripts/risk.mjs pr <number> --write\`, then report the PR link. Do not merge.`,
+};
+
+/** An agent in a new worktree on the latest trunk, to fix or revert the commit whose check failed. */
+async function deployTask(dir, kind, sha, check, url, title) {
+  if (!DEPLOY_PROMPT[kind]) throw new Error(`Unknown deploy task ${kind}`);
+  const repo = await repoInfo(dir);
+  const root = await mainCheckout(dir);
+  const remote = await requireRemote(root, repo);
+  await git(root, ["fetch", "--no-tags", remote, repo.trunk], 120000);
+  const stamp = Date.now().toString(36).slice(-4);
+  const branch = `pr-stack/${kind}-${sha.slice(0, 7)}-${stamp}`;
+  const worktree = path.join(await worktreeFolder(root), slug(branch));
+  fs.mkdirSync(path.dirname(worktree), { recursive: true });
+  await git(root, ["worktree", "add", "--quiet", "-b", branch, worktree, `${remote}/${repo.trunk}`], 120000);
+  const prompt = DEPLOY_PROMPT[kind]({ trunk: repo.trunk, sha, title, check, url, branch });
+  const out = JSON.parse(await hc(["run", "--bg", "--json", "--no-parent", "--name", `${kind}-${sha.slice(0, 7)}-${stamp}`, "--cwd", worktree,
+    "--label", `pr-stack.repo=${repoId(repo)}`, "--label", `pr-stack.task=deploy-${kind}`, ...SPACE_LABEL, "--", ...AGENT_ARGV, prompt]));
+  const address = out.address ?? out.terminal?.address;
+  if (!address) throw new Error(`hc run gave no address: ${JSON.stringify(out).slice(0, 200)}`);
+  await acceptTrust(address);
+  return { address, message: `${kind === "fix" ? "An agent is looking into" : "An agent is reverting"} ${sha.slice(0, 7)} (${address})` };
+}
+
 // ---------- diff ----------
 
 const DIFF_LINES = 3000;   // per file; the rest is on GitHub
@@ -766,6 +820,7 @@ try {
   } else if (cmd === "archive") out = { message: await archive(dir, Number(rest[0])) };
   else if (cmd === "deploys") out = await deploys(dir);
   else if (cmd === "diff") out = await diff(dir, Number(rest[0]));
+  else if (cmd === "deploy") out = await deployTask(dir, rest[0], rest[1], rest[2] ?? "", rest[3] ?? "", rest[4] ?? "");
   else if (cmd === "viewed") out = await viewed(dir, rest[0], rest[1], rest[2] === "on");
   else if (cmd === "checkout") out = await checkout(dir, Number(rest[0]));
   else if (cmd === "auto") out = await auto(dir, rest[0]);

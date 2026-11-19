@@ -3,7 +3,7 @@
 set -eu
 SRC="${HERDR_HOME:-$HOME/.config/herdr-app}"
 DEST="$(cd "$(dirname "$0")" && pwd)"
-MODS="agent-flow agent-plans contributions herdr-md my-files pr-diff pr-stack usage walkthrough"
+MODS="agent-flow agent-plans contributions herdr-md my-files pr-diff pr-stack schedules usage walkthrough"
 EXCLUDE="--exclude node_modules --exclude gpui-kit.d.ts --exclude .cache --exclude .DS_Store --exclude *.log"
 
 for m in $MODS; do

@@ -90,6 +90,7 @@ export function buildPrGroups(prs, trunk, gitParents = new Map()) {
       retargetTo: depth === 0 && pr.baseRefName !== trunk ? trunk : null, basePr: null,
       builtOn: parent && parent.headRefName !== pr.baseRefName ? parent.number : null,
       worktree: null, threads: 0, task: null, files: pr.changedFiles ?? 0, add: pr.additions ?? 0, del: pr.deletions ?? 0,
+      risk: pr.risk ?? null, readyAt: readyAt(pr.statusCheckRollup),
     };
     return [node, ...(children.get(pr.number) ?? []).flatMap((child) => walk(child, depth + 1, pr))];
   };
@@ -384,6 +385,20 @@ export function prActions(pr) {
   return a;
 }
 
+// ---------- merge risk ----------
+
+// The rules live in the merge-risk skill (scripts/risk.mjs). prs.mjs scores each PR with it.
+/** When the last check finished: from then on the PR waits on a review. */
+function readyAt(rollup) {
+  const times = (rollup ?? []).map((c) => Date.parse(c.completedAt ?? "")).filter(Number.isFinite);
+  return times.length ? Math.max(...times) : null;
+}
+
+export const RISK_RANK = { high: 0, medium: 1, low: 2 };
+
+/** Waits on a person: open for review, not a draft, not approved, nothing failing or conflicting. */
+export const needsReview = (pr) => !pr.draft && pr.review !== "approved" && pr.ci !== "fail" && pr.merge !== "conflicts";
+
 // ---------- order ----------
 
 const byUrgency = (a, b) => TONE_RANK[prTone(a)] - TONE_RANK[prTone(b)] || a.number - b.number;
@@ -392,8 +407,20 @@ const newestIn = (g) => g.prs.reduce((m, pr) => (pr.createdAt > m ? pr.createdAt
 const urgencyOf = (g) => Math.min(...g.prs.map((pr) => TONE_RANK[prTone(pr)]));
 const SECTION_ORDER = ["wrong_base", "stack", "independent"];
 
+/** "risk": one flat section per risk level, highest first. In each, the PRs that wait on a review
+ * come first, then by score. A stacked PR shows its parent on its row. */
+function byRisk(groups) {
+  const prs = groups.flatMap((g) => g.prs);
+  return ["high", "medium", "low"].map((level) => ({
+    kind: `risk_${level}`,
+    prs: prs.filter((pr) => (pr.risk?.level ?? "low") === level)
+      .sort((a, b) => Number(needsReview(b)) - Number(needsReview(a)) || (b.risk?.score ?? 0) - (a.risk?.score ?? 0) || a.number - b.number),
+  })).filter((g) => g.prs.length);
+}
+
 /** Orders groups inside their sections, and the independent PRs. A stack keeps its merge order. */
 export function orderGroups(groups, sort) {
+  if (sort === "risk") return byRisk(groups);
   const cmp = sort === "newest" ? (a, b) => newestIn(b).localeCompare(newestIn(a)) : (a, b) => urgencyOf(a) - urgencyOf(b);
   return SECTION_ORDER.flatMap((kind) => groups.filter((g) => g.kind === kind)
     .map((g) => (kind === "independent" ? { kind, prs: [...g.prs].sort(sort === "newest" ? byNewest : byUrgency) } : g))

@@ -99,6 +99,19 @@
               "window_drag": true
             },
             {
+              "id": "schedules-button",
+              "type": "block",
+              "content": {
+                "mod": "schedules",
+                "props": {
+                  "button": true
+                }
+              },
+              "size": {
+                "px": 112
+              }
+            },
+            {
               "id": "activity-button",
               "type": "block",
               "content": {
@@ -218,6 +231,13 @@
                       "type": "block",
                       "content": {
                         "mod": "contributions"
+                      }
+                    },
+                    {
+                      "id": "schedules",
+                      "type": "block",
+                      "content": {
+                        "mod": "schedules"
                       }
                     }
                   ],

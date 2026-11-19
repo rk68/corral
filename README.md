@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Herdr mods" src="https://img.shields.io/badge/Herdr-9%20mods-5fd3e0?style=flat-square&labelColor=070b12">
+  <img alt="Herdr mods" src="https://img.shields.io/badge/Herdr-10%20mods-5fd3e0?style=flat-square&labelColor=070b12">
   <img alt="Works with Claude Code" src="https://img.shields.io/badge/Claude%20Code-supported-a99cf2?style=flat-square&labelColor=070b12">
   <img alt="Works with Codex" src="https://img.shields.io/badge/Codex-supported-7fd6a8?style=flat-square&labelColor=070b12">
   <img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-e8c87e?style=flat-square&labelColor=070b12">
@@ -48,8 +48,14 @@ with a layout, a theme and key bindings that tie them together.
 
 | Mod | What it does |
 |---|---|
-| **pr-stack** | Your open pull requests in merge order. It shows what blocks each one and offers one-click fixes. It can start agents that resolve conflicts or fix CI, merge a whole stack, and show the CI and deploy status of the trunk. |
+| **pr-stack** | Your open pull requests in merge order. It shows what blocks each one and offers one-click fixes. It can start agents that resolve conflicts or fix CI, and merge a whole stack. Each PR shows its merge risk and how long it has waited for review, and "Risk first" groups PRs by risk with the ones to review at the top. When a check on the trunk fails, an agent can find the cause or revert the commit. |
 | **pr-diff** | One pull request's diff in a pane. Each file has GitHub's own "Viewed" box, so your review progress shows on GitHub too. Open it from the file counts on a pr-stack row. |
+
+### Automation
+
+| Mod | What it does |
+|---|---|
+| **schedules** | Runs agents on a schedule: hourly, daily or weekly, in a repo. Presets for the flaky-test check and verification upkeep. A run missed while the app was closed starts when it opens. |
 
 ### Workspace
 
@@ -95,6 +101,8 @@ Then press `cmd-shift-l` in Herdr and choose the `herdr-usage` layout.
   { "statusLine": { "type": "command", "command": "~/.claude/statusline-usage.sh" } }
   ```
 
+- **Merge risk in pr-stack.** Install [rstack](https://github.com/rk68/rstack). pr-stack scores PRs with its
+  `merge-risk` skill, so the panel and your agents use the same rules. Without it, pr-stack hides the risk.
 - **Math and diagrams in herdr-md.** Run `npm install` in `mods/herdr-md/render`.
 
 contributions uses the pixel fonts of Herdr's built-in `win98` mod.

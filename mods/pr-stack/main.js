@@ -7,7 +7,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, panes, focused, exec, theme, props, run, appHome, notify, shared, setShared, layout } from "herdr";
-import { prSignals, prActions, prTone, orderGroups, age, checkCounts, activeTask, TASK_KINDS, TASK_TITLE, TONE_RANK } from "./logic.js";
+import { prSignals, prActions, prTone, orderGroups, age, checkCounts, activeTask, needsReview, TASK_KINDS, TASK_TITLE, TONE_RANK } from "./logic.js";
 
 const MOD = "pr-stack";
 const REFRESH_MS = 45000;
@@ -27,7 +27,9 @@ const QUICK_LABEL = { conflicts: "Resolve", ci: "Fix CI", comments: "Address", m
 const ARMED = new Set(["merge", "auto-merge", "close"]);
 // The most urgent fix first: a wrong base changes what conflicts and what CI runs against.
 const PRIMARY = ["open-agent", "retarget", "conflicts", "ci", "comments", "update", "merge", "ready"];
-const SECTION = { wrong_base: "Fix base", stack: "Stack", independent: "Independent" };
+const SECTION = { wrong_base: "Fix base", stack: "Stack", independent: "Independent", risk_high: "High risk · review first", risk_medium: "Medium risk", risk_low: "Low risk" };
+const SORTS = { urgency: "Urgent first", newest: "Newest first", risk: "Risk first" };
+const RISK_LABEL = { high: "HIGH", medium: "MED", low: "LOW" };
 const DIFF_TARGET = "pr-diff.target"; // read by the pr-diff mod
 const kilo = (n) => (n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
@@ -78,7 +80,7 @@ export default class PrStack extends View {
     this.lastAt = 0;
     this.context = null;
     this.scope = (props()?.scope ?? localStorage.getItem("scope")) === "all" ? "all" : "branch";
-    this.sort = localStorage.getItem("sort") === "newest" ? "newest" : "urgency";
+    this.sort = SORTS[localStorage.getItem("sort")] ? localStorage.getItem("sort") : "urgency";
     this.open = new Set(props()?.expand ?? []); // expanded PR numbers
     this.folded = new Set();       // collapsed stacks, by their first PR
     this.armed = null;             // { key, until }: the next press on key confirms
@@ -228,12 +230,28 @@ export default class PrStack extends View {
           .child(div().flex_none().text_size(11).text_color(t.dim).child(c.pr ? `#${c.pr}` : c.sha.slice(0, 7)))
           .child(div().flex_1().min_w(0).truncate().text_size(12).child(c.title))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(age(new Date(c.at).toISOString(), now))))
-        .child(h_flex().pl(12).flex_wrap().gap_x(2).gap_y(1).children(c.checks.map((x) => chip(c, x))));
+        .child(h_flex().pl(12).flex_wrap().gap_x(2).gap_y(1).children(c.checks.map((x) => chip(c, x))))
+        .when(worst === "failure", (e) => e.child(this.deployActions(c, t)));
     });
     const toggle = (cx) => { this.mainOpen = !this.mainOpen; cx.notify(); };
     return v_flex().w_full()
       .child(this.head("sec-main", `${d.trunk} · deploys`, "", t, { folded: !this.mainOpen, onToggle: d.commits.length > 3 ? toggle : null, right: [summary] }))
       .children(rows);
+  }
+
+  // A failed check on the trunk: an agent finds the cause and opens a fix PR, or reverts the commit.
+  // Revert needs a second press.
+  deployActions(c, t) {
+    const bad = c.checks.find((x) => x.state === "failure");
+    const go = (kind) => (cx) => {
+      const key = `deploy:${c.sha}:${kind}`;
+      if (kind === "revert" && !this.armedFor(key, cx)) return;
+      this.perform(key, ["deploy", this.dir ?? location().dir, kind, c.sha, bad.name, bad.url ?? "", c.title], cx);
+    };
+    const armed = this.armed?.key === `deploy:${c.sha}:revert`;
+    return h_flex().pl(12).gap(5)
+      .child(this.small(`fix-${c.sha.slice(0, 7)}`, "Fix with an agent", t, go("fix"), { solid: true, busy: this.working.has(`deploy:${c.sha}:fix`) }))
+      .child(this.small(`revert-${c.sha.slice(0, 7)}`, armed ? "Press again to revert" : "Revert", t, go("revert"), { danger: armed, busy: this.working.has(`deploy:${c.sha}:revert`) }));
   }
 
   say(text, level = "info") {
@@ -409,6 +427,8 @@ export default class PrStack extends View {
       .when(signals.length > 1 && !step, (e) => e.child(div().flex_none().text_color(t.dim).child(`+${signals.length - 1}`)))
       .when(Boolean(parent), (e) => e.child(div().flex_none().text_color(t.dim).child(`on #${parent}`)))
       .child(div().flex_1())
+      .when(needsReview(pr) && Boolean(pr.readyAt), (e) => e.child(this.waiting(pr, t, now)))
+      .when(Boolean(pr.risk), (e) => e.child(this.riskChip(pr, t)))
       .child(this.diffStat(pr, t, narrow));
 
     return h_flex().id(`pr-${pr.number}`).w_full().items_start().rounded(7).cursor_pointer().pr(8)
@@ -420,6 +440,21 @@ export default class PrStack extends View {
   }
 
   // Files and lines changed; a click opens the PR's diff in a pane.
+  // How long a PR that is ready for review has waited, since its last check finished. Amber after a
+  // day, red after three.
+  waiting(pr, t, now) {
+    const h = (now - pr.readyAt) / 3600000;
+    const color = h > 72 ? t.ansi1 : h > 24 ? t.ansi3 : t.dim;
+    return div().flex_none().text_size(11).text_color(color).child(`waiting ${age(new Date(pr.readyAt).toISOString(), now)}`);
+  }
+
+  // Merge risk from the diff: size, sensitive paths, missing tests. The reasons are in the details.
+  riskChip(pr, t) {
+    const color = { high: t.ansi1, medium: t.ansi3, low: t.dim }[pr.risk.level];
+    return div().flex_none().px(4).rounded(3).text_size(9).font_semibold().border_1().border_color(color).text_color(color)
+      .child(RISK_LABEL[pr.risk.level]);
+  }
+
   diffStat(pr, t, narrow) {
     return h_flex().id(`diffstat-${pr.number}`).flex_none().gap(4).px(4).rounded(4).text_size(11).cursor_pointer()
       .hover((s) => s.bg(t.selected))
@@ -458,6 +493,7 @@ export default class PrStack extends View {
       pr.checks.length ? [passed && `${passed} passed`, failed && `${failed} failed`, running && `${running} running`, skipped && `${skipped} skipped`].filter(Boolean).join(" · ") : "No checks",
       `opened ${age(pr.createdAt, now)} ago`,
       pr.worktree && `worktree ${tilde(pr.worktree)}`,
+      pr.risk && `${pr.risk.level} merge risk · ${pr.risk.reasons.join(", ") || "small change"}`,
       pr.task && `agent ${pr.task.address} · ${TASK_TITLE[pr.task.kind].toLowerCase()} · ${pr.task.status}${pr.task.trigger === "auto" ? " · automatic" : ""}`,
     ].filter(Boolean);
     return v_flex().w_full().gap(8).pt(6).pb(2)
@@ -521,8 +557,8 @@ export default class PrStack extends View {
 
   section(group, t, now) {
     const count = group.prs.length;
-    if (group.kind === "independent") {
-      return v_flex().w_full().child(this.head("sec-independent", SECTION.independent, count, t)).children(group.prs.map((pr) => this.row(pr, t, now)));
+    if (group.kind === "independent" || group.kind.startsWith("risk_")) {
+      return v_flex().w_full().child(this.head(`sec-${group.kind}`, SECTION[group.kind], count, t)).children(group.prs.map((pr) => this.row(pr, t, now)));
     }
     const lead = group.prs[0].number;
     const folded = this.folded.has(lead);
@@ -622,8 +658,8 @@ export default class PrStack extends View {
       .child(div().flex_1().min_w(0).truncate().child(where))
       .when(Boolean(autoOn), (e) => e.child(div().flex_none().text_color(t.accent).child("auto")))
       .child(div().id("sort").flex_none().cursor_pointer().hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => { this.sort = this.sort === "urgency" ? "newest" : "urgency"; localStorage.setItem("sort", this.sort); cx.notify(); })
-        .child(this.sort === "urgency" ? "Urgent first" : "Newest first"));
+        .on_click((_e, cx) => { const k = Object.keys(SORTS); this.sort = k[(k.indexOf(this.sort) + 1) % k.length]; localStorage.setItem("sort", this.sort); cx.notify(); })
+        .child(SORTS[this.sort]));
 
     const notes = [];
     if (d?.filtered) notes.push(h_flex().id("scope-note").gap(4).child(div().text_color(t.dim).child("Related to this branch."))
