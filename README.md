@@ -5,9 +5,9 @@ coding agents (Claude Code, Codex) side by side.
 
 ![A 30-second walkthrough of the mods](docs/demo.gif)
 
-<sub>A 30-second walkthrough: Agent Flow's views, PR Stack, PR Diff, Activity, Plan, the Markdown
-viewer, Files and Usage. [Watch it as an MP4](docs/demo.mp4). The agents are Agent Flow's
-built-in example data, and the pull requests are in a small example repo.</sub>
+<sub>A 30-second walkthrough while a Claude Code session and a Codex session make small changes to
+an example repo: Agent Flow's views of those agents, PR Stack, PR Diff, Activity, Plan, the
+Markdown viewer, Files and Usage. [Watch it as an MP4](docs/demo.mp4).</sub>
 
 ## Mods
 
