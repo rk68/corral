@@ -17,6 +17,8 @@ My mods, layouts, themes and key bindings for the Herdr desktop app.
 
 The layout `herdr-usage` places these mods. `glacier` is the theme.
 
+`herdr-core/templates/` holds the `hc` agent templates (`advisor`, `advisor-codex`, `reviewer`) that the Herdr skills in [rk68/skill-suite](https://github.com/rk68/skill-suite) start.
+
 ## Install
 
 The mods need Node.js 18 or later, and `gh` signed in to GitHub. `pr-stack` also uses `git` and `hc`.
@@ -36,8 +38,9 @@ The mods need Node.js 18 or later, and `gh` signed in to GitHub. `pr-stack` also
    { "statusLine": { "type": "command", "command": "~/.claude/statusline-usage.sh" } }
    ```
 
-4. For `herdr-md` math and diagram rendering, run `npm install` in `mods/herdr-md/render`.
-5. Choose the `herdr-usage` layout with `cmd-shift-l`.
+4. Copy `herdr-core/templates/` to `~/.config/herdr-core/templates/`.
+5. For `herdr-md` math and diagram rendering, run `npm install` in `mods/herdr-md/render`.
+6. Choose the `herdr-usage` layout with `cmd-shift-l`.
 
 `contributions` uses the pixel fonts of the app's built-in `win98` mod.
 
