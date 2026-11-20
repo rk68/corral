@@ -99,6 +99,19 @@
               "window_drag": true
             },
             {
+              "id": "todos-button",
+              "type": "block",
+              "content": {
+                "mod": "todos",
+                "props": {
+                  "button": true
+                }
+              },
+              "size": {
+                "px": 92
+              }
+            },
+            {
               "id": "schedules-button",
               "type": "block",
               "content": {
@@ -238,6 +251,13 @@
                       "type": "block",
                       "content": {
                         "mod": "schedules"
+                      }
+                    },
+                    {
+                      "id": "todos",
+                      "type": "block",
+                      "content": {
+                        "mod": "todos"
                       }
                     }
                   ],

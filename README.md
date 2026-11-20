@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Herdr mods" src="https://img.shields.io/badge/Herdr-10%20mods-5fd3e0?style=flat-square&labelColor=070b12">
+  <img alt="Herdr mods" src="https://img.shields.io/badge/Herdr-11%20mods-5fd3e0?style=flat-square&labelColor=070b12">
   <img alt="Works with Claude Code" src="https://img.shields.io/badge/Claude%20Code-supported-a99cf2?style=flat-square&labelColor=070b12">
   <img alt="Works with Codex" src="https://img.shields.io/badge/Codex-supported-7fd6a8?style=flat-square&labelColor=070b12">
   <img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-e8c87e?style=flat-square&labelColor=070b12">
@@ -56,6 +56,7 @@ with a layout, a theme and key bindings that tie them together.
 | Mod | What it does |
 |---|---|
 | **schedules** | Runs agents on a schedule: hourly, daily or weekly, in a repo. Presets for the flaky-test check and verification upkeep. A run missed while the app was closed starts when it opens. |
+| **todos** | A todo list worked by an orchestrator agent you pick. Queued items go to it as one prompt when it has been idle a while, or it pulls them itself when it has room. It delegates to hc agents, and each item shows the agents on it and their status. Its questions show under "Needs you", with option buttons, and your answer goes back to the orchestrator only. Paste screenshots into an item or an answer. The orchestrator updates the list with `mods/todos/todos.mjs`. |
 
 ### Workspace
 
