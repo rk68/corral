@@ -42,7 +42,7 @@ with a layout, a theme and key bindings that tie them together.
 |---|---|
 | **agent-flow** | A live view of the agents in a space, in seven views: a diagram of who delegated what, agent states, a map, a timeline, context size, lanes and cost. It flags agents that look stuck and cache misses that cost money. |
 | **agent-plans** | Each agent's plan in the right panel, from Claude Code and Codex hooks. |
-| **usage** | Claude Code and Codex plan limits in the sidebar, with Codex's banked resets. It shows every Claude Code account (each `CLAUDE_CONFIG_DIR`) with its email, from the status line and from Anthropic's usage endpoint, and asks that endpoint at most every 5 minutes. |
+| **usage** | Claude Code and Codex plan limits in the sidebar, with Codex's banked resets. It shows every Claude Code account (each `CLAUDE_CONFIG_DIR`) with its email, from the status line and from Anthropic's usage endpoint, and asks that endpoint at most every 5 minutes. It shows every Codex account too: each `~/.local/bin/codex-<name>` script that sets `CODEX_HOME`, with its email and banked resets. |
 
 ### Pull requests
 

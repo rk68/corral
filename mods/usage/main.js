@@ -1,7 +1,8 @@
-// Plan usage for every Claude Code account, and for Codex with its banked resets.
+// Plan usage for every Claude Code and Codex account, and Codex's banked resets.
 // Claude: ./accounts-usage.mjs. If ~/.local/bin/agent-account is installed (not part of this mod),
 // the panel also adds, signs in and starts extra accounts.
-// Codex: `codex app-server` through ./codex-usage.mjs (read limits, use a banked reset).
+// Codex: `codex app-server` through ./codex-usage.mjs, one account per ~/.local/bin/codex-<name>
+// launcher that sets CODEX_HOME (read limits, use a banked reset).
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -74,7 +75,7 @@ export default class Usage extends View {
     this.accountsError = null;
     this.adding = false;
     this.canManage = false; // ~/.local/bin/agent-account is installed: show Add account and Sign in
-    this.codex = null; // GetAccountRateLimitsResponse
+    this.codexAccounts = null; // codex-usage.mjs read output
     this.codexError = null;
     this.codexLoading = false;
     this.confirming = null; // credit id waiting for a second click
@@ -155,6 +156,11 @@ export default class Usage extends View {
     });
   }
 
+  startCodex(a) {
+    const argv = a.name === "default" ? ["codex"] : [`${home()}/.local/bin/codex-${a.name}`];
+    run("tab.new", { name: `Codex ${a.name}`, argv });
+  }
+
   startAccount(a) {
     // The default login has a launcher only once it is named (agent-account rename default work).
     const argv = a.isDefault && a.name === "default" ? ["claude"] : [`${home()}/.local/bin/claude-${a.name}`];
@@ -163,7 +169,7 @@ export default class Usage extends View {
 
   // The layout file holds one height: match it to the state and the number of rows.
   resize() {
-    const rows = (this.accounts?.length ?? 1) + 1;
+    const rows = (this.accounts?.length ?? 1) + (this.codexAccounts?.length ?? 1);
     run("layout.resize", { id: "usage", px: this.collapsed ? COLLAPSED_BASE_PX + rows * COLLAPSED_ROW_PX : EXPANDED_PX });
   }
 
@@ -181,8 +187,10 @@ export default class Usage extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       try {
-        this.codex = await this.codexScript(["read"]);
+        const count = this.codexAccounts?.length;
+        this.codexAccounts = await this.codexScript(["read"]);
         this.codexError = null;
+        if (this.collapsed && count !== this.codexAccounts.length) this.resize();
       } catch (e) {
         this.codexError = String(e?.message ?? e);
       }
@@ -191,16 +199,16 @@ export default class Usage extends View {
     });
   }
 
-  redeem(credit, cx) {
+  redeem(credit, a, cx) {
     if (this.redeeming) return;
     this.confirming = null;
     this.redeeming = { id: credit.id, key: newKey() };
     cx.notify();
     cx.spawn(async (cx) => {
       try {
-        const { outcome } = await this.codexScript(["consume", credit.id, this.redeeming.key]);
+        const { outcome } = await this.codexScript(["consume", credit.id, this.redeeming.key, a.home]);
         const text = {
-          reset: ["Codex limits reset", "success"],
+          reset: [`Codex ${a.name} limits reset`, "success"],
           nothingToReset: ["Nothing to reset: the reset was not used", "info"],
           noCredit: ["That reset is no longer available", "warning"],
           alreadyRedeemed: ["That reset was already used", "warning"],
@@ -223,9 +231,9 @@ export default class Usage extends View {
     cx.notify();
   }
 
-  // Codex as { five, week, other[] }: each window is { label, pct, resetsAt } or null.
-  codexWindows() {
-    const snap = this.codex?.rateLimits ?? {};
+  // A Codex account as { five, week, other[] }: each window is { label, pct, resetsAt } or null.
+  codexWindows(a) {
+    const snap = a?.rateLimits ?? {};
     const out = { five: null, week: null, other: [] };
     for (const w of [snap.primary, snap.secondary].filter(Boolean)) {
       const win = { label: windowLabel(w.windowDurationMins), pct: w.usedPercent, resetsAt: w.resetsAt };
@@ -320,7 +328,7 @@ export default class Usage extends View {
     return out;
   }
 
-  codexSection(t) {
+  codexSections(t) {
     const refresh = div()
       .id("codex-refresh")
       .text_size(10.5)
@@ -329,20 +337,40 @@ export default class Usage extends View {
       .hover((s) => s.text_color(t.foreground))
       .on_click((_e, cx) => this.loadCodex(cx))
       .child(this.codexLoading ? "loading…" : "refresh");
-    const out = [this.sectionHeader(t, "codex", "CODEX", refresh)];
-    if (this.codexError) out.push(div().text_size(11).text_color(t.blocked).child(this.codexError));
-    if (!this.codex) {
-      if (!this.codexError) out.push(div().text_color(t.dim).child("Loading…"));
+    const out = [];
+    if (this.codexError) out.push(this.sectionHeader(t, "codex", "CODEX", refresh), div().text_size(11).text_color(t.blocked).child(this.codexError));
+    if (!this.codexAccounts) {
+      if (!this.codexError) out.push(this.sectionHeader(t, "codex", "CODEX", refresh), div().text_color(t.dim).child("Loading…"));
       return out;
     }
-    const w = this.codexWindows();
+    this.codexAccounts.forEach((a, i) => {
+      if (i > 0) out.push(div().h(1).bg(t.border));
+      out.push(...this.codexSection(t, a, i === 0 && !this.codexError ? refresh : null));
+    });
+    return out;
+  }
+
+  codexSection(t, a, refresh) {
+    const title = a.name === "default" ? "CODEX" : `CODEX · ${a.name.toUpperCase()}`;
+    const right = h_flex()
+      .items_center()
+      .gap(8)
+      .when(Boolean(refresh), (el) => el.child(refresh))
+      .child(button(`codex-start-${a.name}`, "Start", t.raised, t.foreground, () => this.startCodex(a)));
+    const out = [this.sectionHeader(t, "codex", title, right)];
+    if (a.email) out.push(div().truncate().text_size(11).text_color(t.muted).child(a.email));
+    if (a.error) {
+      out.push(div().text_size(11).text_color(t.blocked).child(a.error));
+      return out;
+    }
+    const w = this.codexWindows(a);
     for (const row of [w.five, w.week, ...w.other].filter(Boolean)) out.push(this.limitRow(t, row));
-    const credits = this.codex.rateLimits?.credits;
+    const credits = a.rateLimits?.credits;
     if (credits?.hasCredits || credits?.unlimited) {
       out.push(div().text_size(11).text_color(t.muted).child(credits.unlimited ? "Credits: unlimited" : `Credits: ${credits.balance ?? "?"}`));
     }
 
-    const resets = this.codex.rateLimitResetCredits;
+    const resets = a.rateLimitResetCredits;
     const available = (resets?.credits ?? []).filter((c) => c.status === "available" || c.status === "redeeming");
     out.push(
       h_flex()
@@ -351,11 +379,11 @@ export default class Usage extends View {
         .child(div().flex_1().text_color(t.foreground).child("Banked resets"))
         .child(div().text_color(t.muted).child(String(resets?.availableCount ?? 0))),
     );
-    for (const c of available) out.push(this.creditRow(t, c));
+    for (const c of available) out.push(this.creditRow(t, c, a));
     return out;
   }
 
-  creditRow(t, c) {
+  creditRow(t, c, a) {
     const busy = this.redeeming?.id === c.id || c.status === "redeeming";
     const confirming = this.confirming === c.id;
     const actions = busy
@@ -364,7 +392,7 @@ export default class Usage extends View {
         ? h_flex()
             .gap(4)
             .child(button(`cancel-${c.id}`, "Cancel", t.raised, t.foreground, (_e, cx) => { this.confirming = null; cx.notify(); }))
-            .child(button(`confirm-${c.id}`, "Reset now", t.blocked, t.solid_foreground, (_e, cx) => this.redeem(c, cx)))
+            .child(button(`confirm-${c.id}`, "Reset now", t.blocked, t.solid_foreground, (_e, cx) => this.redeem(c, a, cx)))
         : button(`use-${c.id}`, "Use", t.raised, t.foreground, (_e, cx) => {
             if (this.redeeming) return;
             this.confirming = c.id;
@@ -411,6 +439,7 @@ export default class Usage extends View {
   }
 
   panelHeader(t) {
+    const codexResets = (this.codexAccounts ?? []).reduce((n, a) => n + (a.rateLimitResetCredits?.availableCount ?? 0), 0);
     return h_flex()
       .id("usage-toggle")
       .items_center()
@@ -419,9 +448,7 @@ export default class Usage extends View {
       .on_click((_e, cx) => this.toggle(cx))
       .child(svg(`mods/workspace-chrome/chevron-${this.collapsed ? "right" : "down"}.svg`).size(12).text_color(t.dim))
       .child(div().flex_1().text_size(11).text_color(t.muted).child("Usage"))
-      .when(this.collapsed && (this.codex?.rateLimitResetCredits?.availableCount ?? 0) > 0, (el) =>
-        el.child(div().text_size(10.5).text_color(t.dim).child(`${this.codex.rateLimitResetCredits.availableCount} resets`)),
-      );
+      .when(this.collapsed && codexResets > 0, (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`${codexResets} Codex resets`)));
   }
 
   render(cx) {
@@ -429,9 +456,9 @@ export default class Usage extends View {
     const body = this.collapsed
       ? [
           ...(this.accounts ?? []).map((a) => this.compactRow(t, "claude", this.compactWindows(a), !a.error, a.name)),
-          this.compactRow(t, "codex", this.codexWindows(), Boolean(this.codex), "codex"),
+          ...(this.codexAccounts ?? []).map((a) => this.compactRow(t, "codex", this.codexWindows(a), !a.error, a.name === "default" ? "codex" : a.name)),
         ]
-      : [...this.accountsSections(t), div().h(1).bg(t.border), ...this.codexSection(t)];
+      : [...this.accountsSections(t), div().h(1).bg(t.border), ...this.codexSections(t)];
     return v_flex()
       .id("root")
       .size_full()
