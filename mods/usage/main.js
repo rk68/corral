@@ -1,18 +1,23 @@
-// Plan usage for Claude Code and Codex, plus Codex's banked rate-limit resets.
-// Claude: rate_limits that ~/.claude/statusline-usage.sh saves from Claude Code's status line.
+// Plan usage for every Claude Code account, and for Codex with its banked resets.
+// Claude: ./accounts-usage.mjs. If ~/.local/bin/agent-account is installed (not part of this mod),
+// the panel also adds, signs in and starts extra accounts.
 // Codex: `codex app-server` through ./codex-usage.mjs (read limits, use a banked reset).
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, readTextFile, home, appHome, theme, checking, notify, run, nextCommand } from "herdr";
+import { exec, appHome, home, theme, checking, notify, run, nextCommand } from "herdr";
 
-const CLAUDE_EVERY_MS = 30 * 1000;
+const ACCOUNTS_EVERY_MS = 60 * 1000;
 const CODEX_EVERY_MS = 5 * 60 * 1000;
 // Heights of this panel's layout block ("usage" in layouts/herdr-usage.json).
 const EXPANDED_PX = 490;
-const COLLAPSED_PX = 80;
+const COLLAPSED_ROW_PX = 22;
+const COLLAPSED_BASE_PX = 36;
 const CLAUDE_ORANGE = "#d97757";
 const CLAUDE_USAGE_URL = "https://claude.ai/settings/usage";
+// While a sign-in tab is open, refresh this often, this many times (3 minutes).
+const SIGN_IN_POLL_MS = 5000;
+const SIGN_IN_POLLS = 36;
 
 const button = (id, label, bg, fg, onClick) =>
   h_flex()
@@ -65,7 +70,10 @@ const newKey = () => `herdr-${Date.now().toString(36)}-${Math.random().toString(
 
 export default class Usage extends View {
   init(_props, cx) {
-    this.claude = null; // { captured_at, rate_limits }
+    this.accounts = null; // accounts-usage.mjs output
+    this.accountsError = null;
+    this.adding = false;
+    this.canManage = false; // ~/.local/bin/agent-account is installed: show Add account and Sign in
     this.codex = null; // GetAccountRateLimitsResponse
     this.codexError = null;
     this.codexLoading = false;
@@ -77,29 +85,86 @@ export default class Usage extends View {
     } catch {}
     if (checking()) return;
     // The layout file holds one height: match it to the remembered state.
-    run("layout.resize", { id: "usage", px: this.collapsed ? COLLAPSED_PX : EXPANDED_PX });
+    this.resize();
     // `herdr-app do usage.toggle` (or a key bound to it) collapses and expands the panel.
     cx.spawn(async (cx) => {
       for (;;) {
         if ((await nextCommand()) === "toggle") this.toggle(cx);
       }
     });
-    this.loadClaude(cx);
+    cx.spawn(async (cx) => {
+      this.canManage = (await exec("test", ["-x", `${home()}/.local/bin/agent-account`])).code === 0;
+      cx.notify();
+    });
+    this.loadAccounts(cx);
     this.loadCodex(cx);
-    cx.timer.every(CLAUDE_EVERY_MS, (cx) => this.loadClaude(cx));
+    cx.timer.every(ACCOUNTS_EVERY_MS, (cx) => this.loadAccounts(cx));
     cx.timer.every(CODEX_EVERY_MS, (cx) => this.loadCodex(cx));
   }
 
-  loadClaude(cx) {
+  loadAccounts(cx) {
     cx.spawn(async (cx) => {
-      const text = await readTextFile(`${home()}/.cache/agent-usage/claude.json`).catch(() => null);
       try {
-        this.claude = text ? JSON.parse(text) : null;
-      } catch {
-        this.claude = null;
+        const r = await exec("node", [`${appHome()}/mods/usage/accounts-usage.mjs`], { timeout: 40000 });
+        if (r.code !== 0) throw new Error(r.stderr.trim() || `exit ${r.code}`);
+        const count = this.accounts?.length;
+        this.accounts = JSON.parse(r.stdout.trim().split("\n").pop());
+        this.accountsError = null;
+        if (this.collapsed && count !== this.accounts.length) this.resize();
+      } catch (e) {
+        this.accountsError = String(e?.message ?? e);
       }
       cx.notify();
     });
+  }
+
+  agentAccount(args) {
+    return exec(`${home()}/.local/bin/agent-account`, args, { timeout: 15000 }).then((r) => {
+      if (r.code !== 0) throw new Error(r.stderr.trim() || `exit ${r.code}`);
+      return r.stdout.trim();
+    });
+  }
+
+  // A new tab in the shown space runs the browser sign-in, so the person sees its prompts.
+  signIn(name, cx) {
+    run("tab.new", { name: `Sign in: Claude ${name}`, argv: [`${home()}/.local/bin/agent-account`, "login", name] });
+    this.pollSoon(cx, SIGN_IN_POLLS);
+  }
+
+  pollSoon(cx, times) {
+    cx.timer.after(SIGN_IN_POLL_MS, (cx) => {
+      this.loadAccounts(cx);
+      if (times > 1 && this.accounts?.some((a) => a.needsLogin)) this.pollSoon(cx, times - 1);
+    });
+  }
+
+  addAccount(cx) {
+    if (this.adding) return;
+    this.adding = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const name = await this.agentAccount(["add"]);
+        this.signIn(name, cx);
+        this.loadAccounts(cx);
+      } catch (e) {
+        notify({ title: "Could not add a Claude account", body: String(e?.message ?? e), level: "error" });
+      }
+      this.adding = false;
+      cx.notify();
+    });
+  }
+
+  startAccount(a) {
+    // The default login has a launcher only once it is named (agent-account rename default work).
+    const argv = a.isDefault && a.name === "default" ? ["claude"] : [`${home()}/.local/bin/claude-${a.name}`];
+    run("tab.new", { name: `Claude ${a.name}`, argv });
+  }
+
+  // The layout file holds one height: match it to the state and the number of rows.
+  resize() {
+    const rows = (this.accounts?.length ?? 1) + 1;
+    run("layout.resize", { id: "usage", px: this.collapsed ? COLLAPSED_BASE_PX + rows * COLLAPSED_ROW_PX : EXPANDED_PX });
   }
 
   codexScript(args) {
@@ -154,24 +219,11 @@ export default class Usage extends View {
     try {
       localStorage.setItem("collapsed", this.collapsed ? "1" : "0");
     } catch {}
-    run("layout.resize", { id: "usage", px: this.collapsed ? COLLAPSED_PX : EXPANDED_PX });
+    this.resize();
     cx.notify();
   }
 
-  // Both tools as { five, week, other[] }: each window is { label, pct, resetsAt } or null.
-  claudeWindows() {
-    const now = Date.now() / 1000;
-    const limits = this.claude?.rate_limits ?? {};
-    const win = (label, w) => {
-      if (!w) return null;
-      // A window whose reset time has passed has started again from zero.
-      const expired = w.resets_at && w.resets_at <= now;
-      return { label, pct: expired ? 0 : w.used_percentage, resetsAt: expired ? null : w.resets_at };
-    };
-    const spend = win(`Spend (${limits.spend_limit?.period ?? "period"})`, limits.spend_limit);
-    return { five: win("5-hour", limits.five_hour), week: win("Weekly", limits.seven_day), other: spend ? [spend] : [] };
-  }
-
+  // Codex as { five, week, other[] }: each window is { label, pct, resetsAt } or null.
   codexWindows() {
     const snap = this.codex?.rateLimits ?? {};
     const out = { five: null, week: null, other: [] };
@@ -185,9 +237,8 @@ export default class Usage extends View {
   }
 
   logo(which) {
-    return which === "claude"
-      ? svg("icons/claude.svg").size(14).flex_none().text_color(CLAUDE_ORANGE)
-      : image("icons/codex.svg").w(14).h(14).flex_none().rounded(3);
+    if (which === "claude") return svg("icons/claude.svg").size(14).flex_none().text_color(CLAUDE_ORANGE);
+    return image(`icons/${which}.svg`).w(14).h(14).flex_none().rounded(3);
   }
 
   bar(t, pct) {
@@ -219,23 +270,51 @@ export default class Usage extends View {
       .when(Boolean(right), (el) => el.child(right));
   }
 
-  claudeSection(t) {
-    const ago = this.claude ? div().text_size(10.5).text_color(t.dim).child(agoText(this.claude.captured_at)) : null;
-    const out = [this.sectionHeader(t, "claude", "CLAUDE CODE", ago)];
-    if (!this.claude) {
-      out.push(div().text_color(t.dim).child("No data yet. It appears after a Claude Code reply."));
-    } else {
-      const w = this.claudeWindows();
-      const rows = [w.five, w.week, ...w.other].filter(Boolean);
-      for (const row of rows) out.push(this.limitRow(t, row));
-      if (rows.length === 0) out.push(div().text_color(t.dim).child("No limits reported."));
+  accountSection(t, a) {
+    const title = a.name === "default" ? "CLAUDE CODE" : `CLAUDE CODE · ${a.name.toUpperCase()}`;
+    const action = !a.needsLogin
+      ? button(`start-${a.name}`, "Start", t.raised, t.foreground, () => this.startAccount(a))
+      : this.canManage
+      ? button(`sign-in-${a.name}`, "Sign in", t.accent, t.solid_foreground, (_e, cx) => this.signIn(a.name, cx))
+      : null;
+    const out = [this.sectionHeader(t, "claude", title, action)];
+    if (a.email || a.updatedAt) {
+      out.push(
+        h_flex()
+          .gap(6)
+          .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child(a.email ?? ""))
+          .when(Boolean(a.updatedAt), (el) => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child(agoText(a.updatedAt)))),
+      );
     }
+    if (a.error) out.push(div().text_size(11).text_color(a.needsLogin ? t.dim : t.blocked).child(a.error));
+    for (const w of a.windows) out.push(this.limitRow(t, w));
+    if (!a.error && a.windows.length === 0) out.push(div().text_color(t.dim).child("No limits reported."));
+    return out;
+  }
+
+  accountsSections(t) {
+    const out = [];
+    if (this.accountsError) out.push(div().text_size(11).text_color(t.blocked).child(this.accountsError));
+    if (!this.accounts) {
+      if (!this.accountsError) out.push(div().text_color(t.dim).child("Loading accounts…"));
+      return out;
+    }
+    for (const a of this.accounts) {
+      if (out.length) out.push(div().h(1).bg(t.border));
+      out.push(...this.accountSection(t, a));
+    }
+    if (this.canManage) out.push(
+      h_flex()
+        .pt(6)
+        .child(div().flex_1())
+        .child(button("add-account", this.adding ? "Adding…" : "+ Add account", t.raised, t.foreground, (_e, cx) => this.addAccount(cx))),
+    );
     // Claude's banked resets are only on the claude.ai usage page, so this button opens it.
     out.push(
       h_flex()
         .items_center()
         .pt(6)
-        .child(div().flex_1().text_color(t.foreground).child("Banked resets"))
+        .child(div().flex_1().text_color(t.foreground).child("Claude banked resets"))
         .child(button("claude-usage-page", "Open claude.ai ↗", t.raised, t.foreground, () => exec("open", [CLAUDE_USAGE_URL]))),
     );
     return out;
@@ -304,8 +383,8 @@ export default class Usage extends View {
       .child(actions);
   }
 
-  // One line per tool: logo, then the 5-hour and weekly meters.
-  compactRow(t, which, windows, loaded) {
+  // One line per account: logo, then its two main meters.
+  compactRow(t, which, windows, loaded, label) {
     const meter = (short, w) =>
       h_flex()
         .flex_1()
@@ -319,8 +398,16 @@ export default class Usage extends View {
       .items_center()
       .gap(8)
       .child(this.logo(which))
+      .when(Boolean(label), (el) => el.child(div().w(54).truncate().text_size(10.5).text_color(t.muted).child(label)))
       .when(!loaded, (el) => el.child(div().text_size(11).text_color(t.dim).child("no data yet")))
-      .when(loaded, (el) => el.child(meter("5h", windows.five)).child(meter("wk", windows.week)));
+      .when(loaded, (el) => el.child(meter(windows.fiveLabel ?? "5h", windows.five)).child(meter(windows.weekLabel ?? "wk", windows.week)));
+  }
+
+  // An account's first two windows for the collapsed row (Claude: 5-hour and weekly).
+  compactWindows(a) {
+    const [first, second] = a.windows;
+    const short = (w) => (w?.label === "5-hour" ? "5h" : w?.label === "Weekly" ? "wk" : w?.label?.split(" ")[0].toLowerCase());
+    return { five: first ?? null, week: second ?? null, fiveLabel: short(first) ?? "5h", weekLabel: short(second) ?? "wk" };
   }
 
   panelHeader(t) {
@@ -340,8 +427,11 @@ export default class Usage extends View {
   render(cx) {
     const t = theme();
     const body = this.collapsed
-      ? [this.compactRow(t, "claude", this.claudeWindows(), Boolean(this.claude)), this.compactRow(t, "codex", this.codexWindows(), Boolean(this.codex))]
-      : [...this.claudeSection(t), div().h(1).bg(t.border), ...this.codexSection(t)];
+      ? [
+          ...(this.accounts ?? []).map((a) => this.compactRow(t, "claude", this.compactWindows(a), !a.error, a.name)),
+          this.compactRow(t, "codex", this.codexWindows(), Boolean(this.codex), "codex"),
+        ]
+      : [...this.accountsSections(t), div().h(1).bg(t.border), ...this.codexSection(t)];
     return v_flex()
       .id("root")
       .size_full()
